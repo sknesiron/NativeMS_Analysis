@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime
 from glob import glob
+from itertools import product
 
 import clr
 import matplotlib
@@ -280,7 +281,12 @@ class UnidecInterface(unidec.UniDec):
             np.linspace(0, 1, self.results["mass_peaks"].shape[0])
         )
 
-    def plot_mass_data(self, zoom=None, ax=None):
+    def plot_mass_data(
+        self,
+        zoom=None,
+        ax=None,
+        display_masses=False,
+    ):
         if ax is None:
             fig, ax = plt.subplots()
 
@@ -296,7 +302,6 @@ class UnidecInterface(unidec.UniDec):
         )
         if len(self.results["mass_peaks"].shape) > 1:
             for i, peak in enumerate(self.results["mass_peaks"]):
-                print(peak)
                 ax.scatter(
                     peak[0],
                     peak[1],
@@ -305,12 +310,19 @@ class UnidecInterface(unidec.UniDec):
                     zorder=10,
                     edgecolor="k",
                 )
+
+                if display_masses is True and zoom is not None:
+                    if peak[0] > zoom[0] and peak[0] < zoom[1]:
+                        ax.text(peak[0], peak[1] + 2, f"{peak[0]} Da", fontsize=10)
+                elif display_masses is True:
+                    ax.text(peak[0], peak[1] + 2, f"{peak[0]} Da", fontsize=10)
+
                 self.results["peak_table"].loc[i, "Marker"] = self.results["markers"][
                     i % 8
                 ]
         ax.set(xlabel="Mass [Da]", ylabel="Rel. Int [%]")
 
-    def plot_mz_data(self, zoom=None, ax=None):
+    def plot_mz_data(self, zoom=None, ax=None, threshold=0.1, display_charges=False):
         if ax is None:
             fig, ax = plt.subplots()
 
@@ -329,23 +341,79 @@ class UnidecInterface(unidec.UniDec):
             self.results["mz_data"][1],
             color="darkblue",
             linewidth=1,
+            zorder=1,
         )
         if len(self.results["mz_peaks"].shape) > 1:
             for i, peaks in enumerate(self.results["mz_peaks"][:]):
                 yvals = np.interp(
                     peaks, self.results["mz_data"][0], self.results["mz_data"][1]
                 )
-                ii = yvals > 0.1
+                ii = yvals > threshold
+                pks = peaks[ii]
+                y = yvals[ii]
+
                 ax.scatter(
-                    peaks[ii],
-                    yvals[ii],
+                    pks,
+                    y,
                     marker=self.results["markers"][i % 8],
                     color=self.results["colorvals"][i],
-                    zorder=10,
+                    zorder=5,
                     edgecolor="k",
                 )
+
+                if display_charges is True:
+                    charges = np.rint(self.results["mass_peaks"][i][0] / pks).astype(
+                        "int"
+                    )
+                    for iii, peak in enumerate(pks):
+                        if zoom is not None:
+                            if peak > zoom[0] and peak < zoom[1]:
+                                ax.text(
+                                    peak,
+                                    y[iii] + 0.02,
+                                    charges[iii],
+                                    fontsize=10,
+                                    zorder=10,
+                                )
+                        else:
+                            ax.text(
+                                peak,
+                                y[iii] + 0.02,
+                                charges[iii],
+                                fontsize=10,
+                                zorder=10,
+                            )
 
         ax.set(xlabel="m/z [Th]", ylabel="Rel. Int [a.u]")
 
     def get_peak_df(self):
         return self.results["peak_table"]
+
+    def plot_table(self, ax):
+        df = self.get_peak_df()[["Marker", "Mass", "MassStdGuess", "Area"]]
+        peak_nr = df.index.size
+        size_bbox = 0.05 * peak_nr + 0.05
+
+        ax.table(
+            cellText=df.values,
+            colLabels=df.columns,
+            cellLoc="center",
+            loc="top",
+            colWidths=[0.05, 0.1, 0.1, 0.1],
+            rowColours=self.results["colorvals"],
+            bbox=[0.75, 1 - size_bbox, 0.25, size_bbox],
+        )
+
+
+def get_likely_composition(
+    array, mass, no_subunits: int, max_mutliplicates: int = 1, tolerance=10
+):
+    df = pd.DataFrame(
+        product(range(0, max_mutliplicates + 1), repeat=len(array)), columns=array
+    )
+    df = df[df.sum(1) <= no_subunits]
+    df["sum"] = df[array] @ array
+    df["diff"] = np.abs(df["sum"] - mass)
+    df = df[df["diff"] <= tolerance].copy()
+    filtered = df.sort_values("diff")
+    return filtered
