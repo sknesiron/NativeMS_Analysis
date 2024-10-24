@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 from glob import glob
-from itertools import product
+from itertools import combinations, product
 
 import clr
 import matplotlib
@@ -206,7 +206,7 @@ class SpectraExtractor:
         else:
             add_range = ""
 
-        np.savetxt(f"{folder}/{self.name}_selected_{add_range}.txt", self.spectrum.T)
+        np.savetxt(f"{folder}\\{self.name}_selected_{add_range}.txt", self.spectrum.T)
 
 
 class UnidecInterface(unidec.UniDec):
@@ -239,7 +239,7 @@ class UnidecInterface(unidec.UniDec):
             json.dump(config, output, indent=4)
 
     def load_results(self):
-        for file in glob(f"{self.folder_out}/*_unidec*"):
+        for file in glob(f"{self.folder_out}\\*_unidec*"):
             match file.split("_")[-1]:
                 case "input.dat":
                     self.results["mz_data"] = np.genfromtxt(file).T
@@ -321,6 +321,7 @@ class UnidecInterface(unidec.UniDec):
                     i % 8
                 ]
         ax.set(xlabel="Mass [Da]", ylabel="Rel. Int [%]")
+        ax.locator_params(axis="x", nbins=20)
 
     def plot_mz_data(self, zoom=None, ax=None, threshold=0.1, display_charges=False):
         if ax is None:
@@ -385,6 +386,7 @@ class UnidecInterface(unidec.UniDec):
                             )
 
         ax.set(xlabel="m/z [Th]", ylabel="Rel. Int [a.u]")
+        ax.locator_params(axis="x", nbins=20)
 
     def get_peak_df(self):
         return self.results["peak_table"]
@@ -406,10 +408,10 @@ class UnidecInterface(unidec.UniDec):
 
 
 def get_likely_composition(
-    array, mass, no_subunits: int, max_mutliplicates: int = 1, tolerance=10
+    array, mass, no_subunits: int, max_multiplicates: int = 1, tolerance=10
 ):
     df = pd.DataFrame(
-        product(range(0, max_mutliplicates + 1), repeat=len(array)), columns=array
+        product(range(0, max_multiplicates + 1), repeat=len(array)), columns=array
     )
     df = df[df.sum(1) <= no_subunits]
     df["sum"] = df[array] @ array
@@ -417,3 +419,58 @@ def get_likely_composition(
     df = df[df["diff"] <= tolerance].copy()
     filtered = df.sort_values("diff")
     return filtered
+
+
+def get_all_differences(df):
+    combis = list(combinations(df.index, 2))
+    diff = [np.abs(df.loc[m1, "Mass"] - df.loc[m2, "Mass"]) for m1, m2 in combis]
+    idxs = [f"{m1}, {m2}" for m1, m2 in combis]
+    markers = [f"{df.loc[m1,'Marker']} - {df.loc[m2,'Marker']}" for m1, m2 in combis]
+
+    return pd.DataFrame(
+        {
+            "Indexes": idxs,
+            "Markers": markers,
+            "Difference": diff,
+        }
+    )
+
+
+def get_neighbour_diffs(df, window=2):
+    rg = df.index
+    df_list = []
+    for i in rg:
+        idx = range(max(0, i - window), min(rg.size - 1, i + window) + 1)
+        diffs = [np.abs(df.loc[ii, "Mass"] - df.loc[i, "Mass"]) for ii in idx]
+        markers = df.loc[idx, "Marker"]
+
+        df_list.append(
+            pd.DataFrame(
+                {
+                    "Ref_Peak_idx": i,
+                    "Ref_Peak_Marker": df.loc[i, "Marker"],
+                    "Peak_idx": idx,
+                    "Peak_Marker": markers,
+                    "Difference": diffs,
+                }
+            )
+        )
+
+    return pd.concat(df_list, ignore_index=True)
+
+
+def get_stoichiometries(df, mass_array, no_subunits, max_multiplicates):
+    comp_list = []
+    for i in df.index:
+        comp = get_likely_composition(
+            array=mass_array,
+            mass=df.loc[i, "Mass"],
+            no_subunits=no_subunits,
+            max_multiplicates=max_multiplicates,
+            tolerance=np.inf,
+        ).iloc[0]
+        comp["Mass_i"] = i
+        comp["Mass"] = df.loc[i, "Mass"]
+        comp_list.append(comp)
+
+    return pd.concat(comp_list, axis=1, ignore_index=True).T

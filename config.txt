@@ -1,16 +1,16 @@
 version 6.0.4
 
-minmz 2500
+minmz 1000
 maxmz 20000
-subbuff 0.0
+subbuff 00.0
 smooth 0.0
 
-massub 1000000.0
+massub 500000.0
 masslb 1000.0
 massbins 10.0
 
-peakthresh 0.2
-peakwindow 500
+peakthresh 0.05
+peakwindow 100
 
 adductmass 1.007276467
 
